@@ -16,9 +16,15 @@ Thumbs.db
 .env
 .env.local
 
+# Drive sync manifest (CI generated)
+.drive-sync-manifest
+
 # Drive synced content (populated by CI)
 src/content/*
 !src/content/.gitkeep
+# Drive から同期されるファイルは public/ にも配置される
+# ローカル開発で sync_drive.py を実行した場合、
+# 同期されたファイルはコミットしないこと
 
 # TypeScript
 *.tsbuildinfo

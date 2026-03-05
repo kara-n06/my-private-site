@@ -33,9 +33,11 @@ Google Drive → Apps Script (5分間隔) → GitHub Actions → Vite Build → 
 
 ### 3. Cloudflare Pages
 
-1. Cloudflare Dashboard → Workers & Pages → Create application → Pages
-2. 「Direct Upload」でプロジェクト作成、名前を `my-private-site` に設定
-3. 初回は空の dist/ をアップロード（以降は GitHub Actions が自動デプロイ）
+初回デプロイ時に自動でプロジェクトが作成されます。事前に作っておく場合は CLI で：
+
+```bash
+npx wrangler pages project create my-private-site
+```
 
 ### 4. Cloudflare Access（プライベート化）
 
@@ -65,18 +67,30 @@ Google Drive → Apps Script (5分間隔) → GitHub Actions → Vite Build → 
 
 ### Google Drive フォルダ構成
 
+自由です。Drive のフォルダ構成がそのままサイトのパス構造になります。
+
 ```
-📁 my-site-content/
-├── 📁 pages/         ← HTML ページ
-├── 📁 components/    ← React コンポーネント（.tsx）
-├── 📁 assets/        ← 画像、CSS 等
-└── 📄 site-config.json
+📁 my-site-content/           →  サイト上のパス
+├── index.html                →  /index.html
+├── about.html                →  /about.html
+├── style.css                 →  /style.css
+├── logo.png                  →  /logo.png
+├── 📁 blog/
+│   ├── post1.html            →  /blog/post1.html
+│   └── post1-hero.jpg        →  /blog/post1-hero.jpg
+└── 📁 shared/
+    └── Nav.tsx               →  src/content/shared/Nav.tsx（コンパイル対象）
 ```
+
+振り分けルール（拡張子のみで判定）:
+- `.tsx` / `.jsx` / `.ts` → `src/content/`（Vite がコンパイル）
+- それ以外（`.html` `.css` 画像等）→ `public/`（そのまま配信）
 
 ### 画像の埋め込み
 
-1. `assets/images/` に画像を配置
-2. HTML で参照: `<img src="/assets/images/photo.jpg" alt="..." />`
+1. Drive の任意の場所に画像を配置
+2. HTML で相対パスを参照: `<img src="/blog/post1-hero.jpg" alt="..." />`
+3. 同期時に `public/blog/post1-hero.jpg` にコピーされ、そのまま配信される
 
 ## ローカル開発
 
