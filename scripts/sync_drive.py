@@ -16,8 +16,10 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import shutil
 import sys
+import zipfile
 from pathlib import Path
 
 from google.oauth2 import service_account
@@ -132,8 +134,8 @@ def download_folder(
             exported_name = Path(name).with_suffix(ext).name
             dest = _resolve_dest(exported_name, rel_folder)
             dest.parent.mkdir(parents=True, exist_ok=True)
-            _export_file(service, item["id"], export_mime, dest)
-            synced.append(dest)
+            exported_files = _export_file(service, item["id"], export_mime, dest)
+            synced.extend(exported_files)
             count += 1
 
         elif mime not in SKIP_MIMETYPES:
@@ -146,11 +148,49 @@ def download_folder(
     return count
 
 
-def _export_file(service, file_id: str, mime: str, dest: Path) -> None:
+def _export_file(service, file_id: str, mime: str, dest: Path) -> list[Path]:
     """Google Workspace ファイルを指定 MIME type でエクスポート."""
     data = service.files().export_media(fileId=file_id, mimeType=mime).execute()
-    dest.write_bytes(data)
-    print(f"  exported  → {dest}")
+    created_files = [dest]
+
+    if mime == "text/html":
+        # Google Docs export as text/html returns a ZIP archive
+        with zipfile.ZipFile(io.BytesIO(data)) as z:
+            html_files = [f for f in z.namelist() if f.endswith(".html")]
+            if html_files:
+                html_filename = html_files[0]
+                html_content = z.read(html_filename).decode("utf-8")
+
+                # Setup image directory for this specific document
+                images_dir_name = f"{dest.stem}_images"
+                images_dest_dir = dest.parent / images_dir_name
+
+                # Extract images and rewrite paths
+                has_images = False
+                for file_in_zip in z.namelist():
+                    if file_in_zip.startswith("images/") and len(file_in_zip) > 7:
+                        has_images = True
+                        images_dest_dir.mkdir(parents=True, exist_ok=True)
+                        img_data = z.read(file_in_zip)
+                        img_name = Path(file_in_zip).name
+                        img_dest = images_dest_dir / img_name
+                        img_dest.write_bytes(img_data)
+                        created_files.append(img_dest)
+
+                if has_images:
+                    # Rewrite src="images/..." to src="docname_images/..."
+                    html_content = re.sub(r'(src=["\'])images/', rf'\1{images_dir_name}/', html_content)
+
+                dest.write_text(html_content, encoding="utf-8")
+                print(f"  exported (extracted from zip) → {dest}")
+            else:
+                dest.write_bytes(data)
+                print(f"  exported → {dest}")
+    else:
+        dest.write_bytes(data)
+        print(f"  exported  → {dest}")
+
+    return created_files
 
 
 def _download_file(service, file_id: str, dest: Path) -> None:
