@@ -145,6 +145,10 @@ def download_folder(
             synced.append(dest)
             count += 1
 
+            # Inject navigation script if the downloaded file is a standalone HTML page
+            if dest.suffix.lower() == ".html":
+                _inject_navigation(dest)
+
     return count
 
 
@@ -207,6 +211,40 @@ def _download_file(service, file_id: str, dest: Path) -> None:
     print(f"  downloaded → {dest}")
 
 
+def _inject_navigation(html_path: Path) -> None:
+    """スタンドアロンの HTML ページにナビゲーション用の JS を注入する."""
+    try:
+        content = html_path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return  # バイナリ等の場合はスキップ
+
+    nav_script = """
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    fetch('/pages.json')
+      .then(res => res.json())
+      .then(pages => {
+          const nav = document.createElement('div');
+          nav.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 50px; background: #f8f9fa; border-bottom: 1px solid #ddd; padding: 10px 20px; z-index: 99999; display: flex; gap: 15px; overflow-x: auto; font-family: sans-serif; box-sizing: border-box;';
+          let html = '<a href="/" style="color: #000; font-weight: bold; text-decoration: none;">🏠 Home</a>';
+          pages.forEach(p => {
+              html += `<a href="${p.path}" style="color: #0066cc; text-decoration: none;">${p.title}</a>`;
+          });
+          nav.innerHTML = html;
+          document.body.prepend(nav);
+          document.body.style.marginTop = '50px';
+      })
+      .catch(e => console.error('Failed to load navigation', e));
+});
+</script>
+"""
+    if "</body>" in content:
+        content = content.replace("</body>", f"{nav_script}\n</body>")
+    else:
+        content += nav_script
+    html_path.write_text(content, encoding="utf-8")
+
+
 def _clean_synced_content() -> None:
     """前回同期分をクリア（リポジトリ側のファイルは残す）.
 
@@ -246,13 +284,18 @@ def _record_pages_index(synced_files: list[Path]) -> None:
     pages = []
 
     for p in synced_files:
-        if p.suffix == ".html" and str(STATIC_DIR) in [str(parent) for parent in p.parents] + [str(p.parent)]:
+        if p.suffix == ".html" and "public" in p.parts:
             # public/ 配下のHTMLファイル
-            rel_path = p.relative_to(STATIC_DIR).as_posix()
+            idx = p.parts.index("public")
+            rel_parts = p.parts[idx+1:]
+            rel_path = "/".join(rel_parts)
             pages.append({"title": p.stem, "path": f"/{rel_path}"})
-        elif p.suffix in COMPILABLE_EXTENSIONS and str(COMPILED_DIR) in [str(parent) for parent in p.parents] + [str(p.parent)]:
+        elif p.suffix in COMPILABLE_EXTENSIONS and "src" in p.parts and "content" in p.parts:
             # src/content/ 配下のコンパイル対象ファイル
-            rel_path = p.relative_to(COMPILED_DIR).with_suffix("").as_posix().lower()
+            idx = p.parts.index("content")
+            rel_parts = p.parts[idx+1:]
+            rel_path = "/".join(rel_parts)
+            rel_path = rel_path.rsplit(".", 1)[0].lower()
             pages.append({"title": p.stem, "path": f"/{rel_path}"})
 
     index_path = STATIC_DIR / "pages.json"
