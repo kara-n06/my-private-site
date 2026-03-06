@@ -225,10 +225,10 @@ document.addEventListener('DOMContentLoaded', function() {
       .then(res => res.json())
       .then(pages => {
           const nav = document.createElement('div');
-          nav.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 50px; background: #f8f9fa; border-bottom: 1px solid #ddd; padding: 10px 20px; z-index: 99999; display: flex; gap: 15px; overflow-x: auto; font-family: sans-serif; box-sizing: border-box;';
-          let html = '<a href="/" style="color: #000; font-weight: bold; text-decoration: none;">🏠 Home</a>';
+          nav.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 50px; background: #0b1017; border-bottom: 1px solid #162030; padding: 10px 20px; z-index: 99999; display: flex; gap: 15px; overflow-x: auto; font-family: "IBM Plex Sans", sans-serif; box-sizing: border-box;';
+          let html = '<a href="/" style="color: #dde6f0; font-weight: bold; text-decoration: none;">🏠 Home</a>';
           pages.forEach(p => {
-              html += `<a href="${p.path}" style="color: #0066cc; text-decoration: none;">${p.title}</a>`;
+              html += `<a href="${p.path}" style="color: #0ea5e9; text-decoration: none; padding: 0 8px; border-radius: 4px;">${p.title}</a>`;
           });
           nav.innerHTML = html;
           document.body.prepend(nav);
