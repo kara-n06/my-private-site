@@ -241,6 +241,26 @@ def _record_manifest(synced_files: list[Path]) -> None:
     manifest.write_text("\n".join(str(p) for p in synced_files) + "\n")
 
 
+def _record_pages_index(synced_files: list[Path]) -> None:
+    """フロントエンドのナビゲーション用に index を生成."""
+    pages = []
+
+    for p in synced_files:
+        if p.suffix == ".html" and str(STATIC_DIR) in [str(parent) for parent in p.parents] + [str(p.parent)]:
+            # public/ 配下のHTMLファイル
+            rel_path = p.relative_to(STATIC_DIR).as_posix()
+            pages.append({"title": p.stem, "path": f"/{rel_path}"})
+        elif p.suffix in COMPILABLE_EXTENSIONS and str(COMPILED_DIR) in [str(parent) for parent in p.parents] + [str(p.parent)]:
+            # src/content/ 配下のコンパイル対象ファイル
+            rel_path = p.relative_to(COMPILED_DIR).with_suffix("").as_posix().lower()
+            pages.append({"title": p.stem, "path": f"/{rel_path}"})
+
+    index_path = STATIC_DIR / "pages.json"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text(json.dumps(pages, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Index generated: {index_path} ({len(pages)} pages)")
+
+
 def main() -> None:
     folder_id = os.environ.get("DRIVE_FOLDER_ID")
     if not folder_id:
@@ -258,6 +278,7 @@ def main() -> None:
     synced: list[Path] = []
     count = download_folder(service, folder_id, Path(""), synced)
     _record_manifest(synced)
+    _record_pages_index(synced)
 
     print(f"Sync complete: {count} file(s)")
 
