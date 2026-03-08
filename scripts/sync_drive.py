@@ -49,6 +49,9 @@ SKIP_MIMETYPES: set[str] = {
     "application/vnd.google-apps.map",
 }
 
+# ナビゲーションに表示するリンクの最大数（超えたら "More ▾" に収納）
+NAV_VISIBLE_LIMIT = 5
+
 
 def get_drive_service():
     """サービスアカウント認証で Drive API v3 クライアントを生成."""
@@ -65,15 +68,7 @@ def get_drive_service():
 
 
 def _resolve_dest(filename: str, rel_folder: Path) -> Path:
-    """ファイル名の拡張子に応じて同期先を決定する.
-
-    Args:
-        filename: ファイル名（拡張子を含む）
-        rel_folder: Drive フォルダルートからの相対パス
-
-    Returns:
-        書き込み先の絶対パス
-    """
+    """ファイル名の拡張子に応じて同期先を決定する."""
     ext = Path(filename).suffix.lower()
     if ext in COMPILABLE_EXTENSIONS:
         return COMPILED_DIR / rel_folder / filename
@@ -110,14 +105,7 @@ def download_folder(
     rel_folder: Path,
     synced: list[Path] | None = None,
 ) -> int:
-    """フォルダを再帰的にダウンロードし、同期したファイル数を返す.
-
-    Args:
-        service: Drive API クライアント
-        folder_id: Drive フォルダ ID
-        rel_folder: Drive ルートからの相対パス（振り分けに使用）
-        synced: 同期したファイルパスを蓄積するリスト
-    """
+    """フォルダを再帰的にダウンロードし、同期したファイル数を返す."""
     if synced is None:
         synced = []
     count = 0
@@ -145,7 +133,6 @@ def download_folder(
             synced.append(dest)
             count += 1
 
-            # Inject navigation script if the downloaded file is a standalone HTML page
             if dest.suffix.lower() == ".html":
                 _inject_navigation(dest)
 
@@ -158,18 +145,14 @@ def _export_file(service, file_id: str, mime: str, dest: Path) -> list[Path]:
     created_files = [dest]
 
     if mime == "text/html":
-        # Google Docs export as text/html returns a ZIP archive
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             html_files = [f for f in z.namelist() if f.endswith(".html")]
             if html_files:
-                html_filename = html_files[0]
-                html_content = z.read(html_filename).decode("utf-8")
+                html_content = z.read(html_files[0]).decode("utf-8")
 
-                # Setup image directory for this specific document
                 images_dir_name = f"{dest.stem}_images"
                 images_dest_dir = dest.parent / images_dir_name
 
-                # Extract images and rewrite paths
                 has_images = False
                 for file_in_zip in z.namelist():
                     if file_in_zip.startswith("images/") and len(file_in_zip) > 7:
@@ -182,7 +165,6 @@ def _export_file(service, file_id: str, mime: str, dest: Path) -> list[Path]:
                         created_files.append(img_dest)
 
                 if has_images:
-                    # Rewrite src="images/..." to src="docname_images/..."
                     html_content = re.sub(r'(src=["\'])images/', rf'\1{images_dir_name}/', html_content)
 
                 dest.write_text(html_content, encoding="utf-8")
@@ -212,60 +194,336 @@ def _download_file(service, file_id: str, dest: Path) -> None:
 
 
 def _inject_navigation(html_path: Path) -> None:
-    """スタンドアロンの HTML ページにナビゲーション用の JS を注入する."""
+    """スタンドアロンの HTML ページにナビゲーション用の CSS + JS を注入する.
+
+    デザイントークンは global.css と同期させること。
+    NAV_VISIBLE_LIMIT を超えたページは "More ▾" ドロップダウンに収納する。
+    """
     try:
         content = html_path.read_text(encoding="utf-8")
     except UnicodeDecodeError:
-        return  # バイナリ等の場合はスキップ
+        return
 
-    nav_script = """
+    nav_style = """
+<style>
+  /* ── Design Tokens (sync with global.css) ── */
+  :root {
+    --nav-bg:       rgba(11, 16, 23, 0.92);
+    --nav-border:   #162030;
+    --nav-height:   52px;
+    --accent:       #0ea5e9;
+    --accent-lo:    rgba(14, 165, 233, 0.09);
+    --accent-md:    rgba(14, 165, 233, 0.18);
+    --border-hi:    rgba(14, 165, 233, 0.35);
+    --surf2:        #0f1825;
+    --txt:          #dde6f0;
+    --txt2:         #7a9bb5;
+    --txt3:         #3d5a73;
+    --radius:       6px;
+    --radius-lg:    10px;
+    --shadow-md:    0 8px 24px rgba(0,0,0,0.6);
+    --shadow-glow:  0 0 20px rgba(14, 165, 233, 0.15);
+    --font-mono:    'IBM Plex Mono', monospace;
+    --font-disp:    'Bebas Neue', sans-serif;
+    --font-sans:    'IBM Plex Sans', sans-serif;
+  }
+
+  /* ── Google Fonts (same subset as global.css) ── */
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500&display=swap');
+
+  /* ── Keyframes ── */
+  @keyframes _siteNavGlowBlink {
+    0%, 100% { opacity: .4; }
+    50%       { opacity: 1; }
+  }
+  @keyframes _siteNavDropIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Nav shell ── */
+  #__site-nav {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%;
+    height: var(--nav-height);
+    background: var(--nav-bg);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--nav-border);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 0;
+    box-sizing: border-box;
+    font-family: var(--font-sans);
+  }
+
+  /* ── Logo ── */
+  #__site-nav .sn-logo {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--txt);
+    font-family: var(--font-disp);
+    font-size: 1.1rem;
+    letter-spacing: .1em;
+    white-space: nowrap;
+    flex-shrink: 0;
+    text-decoration: none;
+    transition: color .15s ease;
+  }
+  #__site-nav .sn-logo:hover { color: var(--accent); text-decoration: none; }
+  #__site-nav .sn-logo-icon {
+    color: var(--accent);
+    font-size: 1rem;
+    animation: _siteNavGlowBlink 3s ease-in-out infinite;
+  }
+
+  /* ── Divider ── */
+  #__site-nav .sn-divider {
+    width: 1px;
+    height: 22px;
+    background: var(--nav-border);
+    margin: 0 16px;
+    flex-shrink: 0;
+  }
+
+  /* ── Links container ── */
+  #__site-nav .sn-links {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Nav button (shared) ── */
+  #__site-nav .sn-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: var(--radius);
+    font-size: .8rem;
+    font-family: var(--font-mono);
+    letter-spacing: .04em;
+    color: var(--txt2);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: none;
+    transition: all .15s ease;
+    -webkit-font-smoothing: antialiased;
+  }
+  #__site-nav .sn-btn:hover {
+    color: var(--txt);
+    background: var(--accent-lo);
+    text-decoration: none;
+  }
+  #__site-nav .sn-btn.active {
+    color: var(--accent);
+    background: var(--accent-md);
+  }
+
+  /* ── More trigger ── */
+  #__site-nav .sn-more-wrap {
+    position: relative;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+  #__site-nav .sn-more-btn {
+    border: 1px solid var(--nav-border);
+  }
+  #__site-nav .sn-more-btn:hover,
+  #__site-nav .sn-more-btn.open {
+    border-color: var(--border-hi);
+  }
+  #__site-nav .sn-more-btn.active {
+    color: var(--accent);
+    background: var(--accent-md);
+    border-color: var(--border-hi);
+  }
+  #__site-nav .sn-chevron {
+    font-size: .6rem;
+    opacity: .6;
+  }
+
+  /* ── Dropdown ── */
+  #__site-nav .sn-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 200px;
+    background: var(--surf2);
+    border: 1px solid var(--border-hi);
+    border-radius: var(--radius-lg);
+    padding: 6px;
+    box-shadow: var(--shadow-md), var(--shadow-glow);
+    animation: _siteNavDropIn .18s ease both;
+    z-index: 200;
+    display: none;
+  }
+  #__site-nav .sn-dropdown.open { display: block; }
+
+  #__site-nav .sn-drop-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    font-size: .82rem;
+    font-family: var(--font-mono);
+    color: var(--txt2);
+    text-decoration: none;
+    transition: all .12s ease;
+    -webkit-font-smoothing: antialiased;
+  }
+  #__site-nav .sn-drop-item:hover {
+    color: var(--txt);
+    background: var(--accent-lo);
+    text-decoration: none;
+  }
+  #__site-nav .sn-drop-item.active {
+    color: var(--accent);
+    background: var(--accent-md);
+  }
+  #__site-nav .sn-drop-bullet {
+    color: var(--accent);
+    opacity: .6;
+    font-size: .9rem;
+  }
+</style>
+"""
+
+    nav_script = f"""
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    fetch('/pages.json')
-      .then(res => res.json())
-      .then(pages => {
-          const nav = document.createElement('div');
-          nav.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 50px; background: #0b1017; border-bottom: 1px solid #162030; padding: 10px 20px; z-index: 99999; display: flex; gap: 15px; overflow-x: auto; font-family: "IBM Plex Sans", sans-serif; box-sizing: border-box;';
-          let html = '<a href="/" style="color: #dde6f0; font-weight: bold; text-decoration: none;">🏠 Home</a>';
-          pages.forEach(p => {
-              html += `<a href="${p.path}" style="color: #0ea5e9; text-decoration: none; padding: 0 8px; border-radius: 4px;">${p.title}</a>`;
-          });
-          nav.innerHTML = html;
-          document.body.prepend(nav);
-          document.body.style.marginTop = '50px';
-      })
-      .catch(e => console.error('Failed to load navigation', e));
-});
+(function() {{
+  var LIMIT = {NAV_VISIBLE_LIMIT};
+  var currentPath = window.location.pathname;
+
+  fetch('/pages.json')
+    .then(function(r) {{ return r.json(); }})
+    .then(function(pages) {{
+      var primary  = pages.slice(0, LIMIT);
+      var overflow = pages.slice(LIMIT);
+
+      /* ── Build nav ── */
+      var nav = document.createElement('div');
+      nav.id = '__site-nav';
+
+      /* Logo */
+      var logo = document.createElement('a');
+      logo.href = '/';
+      logo.className = 'sn-logo';
+      logo.innerHTML = '<span class="sn-logo-icon">◈</span><span>HOME</span>';
+      nav.appendChild(logo);
+
+      /* Divider */
+      var divider = document.createElement('div');
+      divider.className = 'sn-divider';
+      nav.appendChild(divider);
+
+      /* Links container */
+      var links = document.createElement('div');
+      links.className = 'sn-links';
+
+      primary.forEach(function(p) {{
+        var a = document.createElement('a');
+        a.href = p.path;
+        a.className = 'sn-btn' + (currentPath === p.path ? ' active' : '');
+        a.textContent = p.title;
+        links.appendChild(a);
+      }});
+
+      /* More dropdown */
+      if (overflow.length > 0) {{
+        var overflowActive = overflow.some(function(p) {{ return p.path === currentPath; }});
+
+        var moreWrap = document.createElement('div');
+        moreWrap.className = 'sn-more-wrap';
+
+        var moreBtn = document.createElement('button');
+        moreBtn.className = 'sn-btn sn-more-btn' + (overflowActive ? ' active' : '');
+        moreBtn.setAttribute('aria-haspopup', 'true');
+        moreBtn.setAttribute('aria-expanded', 'false');
+        moreBtn.innerHTML = 'More <span class="sn-chevron">▼</span>';
+
+        var dropdown = document.createElement('div');
+        dropdown.className = 'sn-dropdown';
+        dropdown.setAttribute('role', 'menu');
+
+        overflow.forEach(function(p) {{
+          var item = document.createElement('a');
+          item.href = p.path;
+          item.className = 'sn-drop-item' + (currentPath === p.path ? ' active' : '');
+          item.setAttribute('role', 'menuitem');
+          item.innerHTML = '<span class="sn-drop-bullet">›</span>' + p.title;
+          dropdown.appendChild(item);
+        }});
+
+        moreBtn.addEventListener('click', function(e) {{
+          e.stopPropagation();
+          var isOpen = dropdown.classList.toggle('open');
+          moreBtn.classList.toggle('open', isOpen);
+          moreBtn.querySelector('.sn-chevron').textContent = isOpen ? '▲' : '▼';
+          moreBtn.setAttribute('aria-expanded', String(isOpen));
+        }});
+
+        document.addEventListener('click', function() {{
+          dropdown.classList.remove('open');
+          moreBtn.classList.remove('open');
+          moreBtn.querySelector('.sn-chevron').textContent = '▼';
+          moreBtn.setAttribute('aria-expanded', 'false');
+        }});
+
+        moreWrap.appendChild(moreBtn);
+        moreWrap.appendChild(dropdown);
+        links.appendChild(moreWrap);
+      }}
+
+      nav.appendChild(links);
+      document.body.prepend(nav);
+
+      /* Push body down to avoid content hidden behind sticky nav */
+      document.body.style.paddingTop = 'calc(52px + ' +
+        (parseInt(getComputedStyle(document.body).paddingTop) || 0) + 'px)';
+    }})
+    .catch(function(e) {{ console.error('[site-nav] Failed to load pages.json', e); }});
+}})();
 </script>
 """
-    if "</body>" in content:
-        content = content.replace("</body>", f"{nav_script}\n</body>")
+
+    inject = nav_style + nav_script
+
+    if "</head>" in content:
+        # font import を head の早い段階に入れる
+        content = content.replace("</head>", nav_style + "</head>", 1)
+        # スクリプトは body 末尾
+        content = content.replace("</body>", nav_script + "\n</body>", 1)
+    elif "</body>" in content:
+        content = content.replace("</body>", inject + "\n</body>", 1)
     else:
-        content += nav_script
+        content += inject
+
     html_path.write_text(content, encoding="utf-8")
 
 
 def _clean_synced_content() -> None:
-    """前回同期分をクリア（リポジトリ側のファイルは残す）.
-
-    マニフェストファイルに前回同期したパスを記録し、
-    次回同期時にそのファイルだけを削除する。
-    """
+    """前回同期分をクリア（リポジトリ側のファイルは残す）."""
     manifest = Path(".drive-sync-manifest")
 
-    # src/content/ は Drive 同期専用なので全削除して問題ない
     if COMPILED_DIR.exists():
         shutil.rmtree(COMPILED_DIR)
     COMPILED_DIR.mkdir(parents=True, exist_ok=True)
 
-    # public/ は _redirects 等リポジトリのファイルもあるので
-    # マニフェストに記録された Drive 由来ファイルのみ削除
     if manifest.exists():
         for line in manifest.read_text().splitlines():
             p = Path(line.strip())
             if p.exists() and p.is_file():
                 p.unlink()
-        # 空ディレクトリを掃除
         for dirpath in sorted(STATIC_DIR.rglob("*"), reverse=True):
             if dirpath.is_dir() and not any(dirpath.iterdir()):
                 dirpath.rmdir()
@@ -285,15 +543,13 @@ def _record_pages_index(synced_files: list[Path]) -> None:
 
     for p in synced_files:
         if p.suffix == ".html" and "public" in p.parts:
-            # public/ 配下のHTMLファイル
             idx = p.parts.index("public")
-            rel_parts = p.parts[idx+1:]
+            rel_parts = p.parts[idx + 1:]
             rel_path = "/".join(rel_parts)
             pages.append({"title": p.stem, "path": f"/{rel_path}"})
         elif p.suffix in COMPILABLE_EXTENSIONS and "src" in p.parts and "content" in p.parts:
-            # src/content/ 配下のコンパイル対象ファイル
             idx = p.parts.index("content")
-            rel_parts = p.parts[idx+1:]
+            rel_parts = p.parts[idx + 1:]
             rel_path = "/".join(rel_parts)
             rel_path = rel_path.rsplit(".", 1)[0].lower()
             pages.append({"title": p.stem, "path": f"/{rel_path}"})

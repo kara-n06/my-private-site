@@ -1,0 +1,10 @@
+[project]
+name = "my-private-site"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "google-api-python-client>=2.192.0",
+    "google-auth>=2.49.0",
+]
