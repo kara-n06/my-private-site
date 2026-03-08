@@ -63,7 +63,7 @@ export function Home() {
             {pages.map((p, i) => (
               <Link
                 key={p.path}
-                to={p.path}
+                to={p.title}
                 className="toc-card fade-in"
                 style={{ animationDelay: `${i * 0.05}s` }}
               >
