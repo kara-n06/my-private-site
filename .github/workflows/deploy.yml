@@ -24,19 +24,19 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.12"
+          enable-cache: true
 
       - name: Install Python dependencies
-        run: pip install google-api-python-client google-auth
+        run: uv sync --frozen
 
       - name: Sync content from Google Drive
         env:
           GOOGLE_SERVICE_ACCOUNT_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
-        run: python scripts/sync_drive.py
+        run: uv run python scripts/sync_drive.py
 
       - name: Install npm dependencies
         run: npm ci
