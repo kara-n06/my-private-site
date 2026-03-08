@@ -60,20 +60,28 @@ export function Home() {
 
         {!loading && pages.length > 0 && (
           <div className="toc-grid">
-            {pages.map((p, i) => (
-              <Link
-                key={p.path}
-                to={p.title}
-                className="toc-card fade-in"
-                style={{ animationDelay: `${i * 0.05}s` }}
-              >
-                <span className="toc-card-index">
-                  {String(i + 1).padStart(2, "0")}
-                </span>
-                <span className="toc-card-title">{p.title}</span>
-                <span className="toc-card-arrow">→</span>
-              </Link>
-            ))}
+            {pages.map((p, i) => {
+              const isStatic = p.path.endsWith(".html");
+              const cardProps = {
+                key: p.path,
+                className: "toc-card fade-in",
+                style: { animationDelay: `${i * 0.05}s` },
+              };
+              const children = (
+                <>
+                  <span className="toc-card-index">
+                    {String(i + 1).padStart(2, "0")}
+                  </span>
+                  <span className="toc-card-title">{p.title}</span>
+                  <span className="toc-card-arrow">→</span>
+                </>
+              );
+              return isStatic ? (
+                <a href={p.path} {...cardProps}>{children}</a>
+              ) : (
+                <Link to={p.path} {...cardProps}>{children}</Link>
+              );
+            })}
           </div>
         )}
       </section>

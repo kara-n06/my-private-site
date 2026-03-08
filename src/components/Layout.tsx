@@ -57,15 +57,15 @@ export function Layout() {
           <div className="nav-divider" />
 
           <div className="nav-links">
-            {primary.map((p) => (
-              <Link
-                key={p.path}
-                to={p.path}
-                className={`nav-btn${location.pathname === p.path ? " active" : ""}`}
-              >
-                {p.title}
-              </Link>
-            ))}
+            {primary.map((p) => {
+              const isStatic = p.path.endsWith(".html");
+              const cls = `nav-btn${location.pathname === p.path ? " active" : ""}`;
+              return isStatic ? (
+                <a key={p.path} href={p.path} className={cls}>{p.title}</a>
+              ) : (
+                <Link key={p.path} to={p.path} className={cls}>{p.title}</Link>
+              );
+            })}
 
             {hasOverflow && (
               <div className="nav-more" ref={moreRef}>
@@ -81,17 +81,21 @@ export function Layout() {
 
                 {moreOpen && (
                   <div className="nav-dropdown" role="menu">
-                    {overflow.map((p) => (
-                      <Link
-                        key={p.path}
-                        to={p.path}
-                        className={`dropdown-item${location.pathname === p.path ? " active" : ""}`}
-                        role="menuitem"
-                      >
-                        <span className="dropdown-bullet">›</span>
-                        {p.title}
-                      </Link>
-                    ))}
+                    {overflow.map((p) => {
+                      const isStatic = p.path.endsWith(".html");
+                      const cls = `dropdown-item${location.pathname === p.path ? " active" : ""}`;
+                      const content = (
+                        <>
+                          <span className="dropdown-bullet">›</span>
+                          {p.title}
+                        </>
+                      );
+                      return isStatic ? (
+                        <a key={p.path} href={p.path} className={cls} role="menuitem">{content}</a>
+                      ) : (
+                        <Link key={p.path} to={p.path} className={cls} role="menuitem">{content}</Link>
+                      );
+                    })}
                   </div>
                 )}
               </div>
