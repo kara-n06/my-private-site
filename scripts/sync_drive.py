@@ -537,6 +537,18 @@ def _record_manifest(synced_files: list[Path]) -> None:
     manifest.write_text("\n".join(str(p) for p in synced_files) + "\n")
 
 
+def _extract_html_title(path: Path) -> str:
+    """HTML ファイルの <title> タグからタイトルを取得する. 見つからなければファイル名を返す."""
+    try:
+        content = path.read_text(encoding="utf-8", errors="ignore")
+        m = re.search(r"<title[^>]*>(.*?)</title>", content, re.IGNORECASE | re.DOTALL)
+        if m:
+            return re.sub(r"\s+", " ", m.group(1)).strip()
+    except OSError:
+        pass
+    return path.stem
+
+
 def _record_pages_index(synced_files: list[Path]) -> None:
     """フロントエンドのナビゲーション用に index を生成."""
     pages = []
@@ -546,7 +558,8 @@ def _record_pages_index(synced_files: list[Path]) -> None:
             idx = p.parts.index("public")
             rel_parts = p.parts[idx + 1:]
             rel_path = "/".join(rel_parts)
-            pages.append({"title": p.stem, "path": f"/{rel_path}"})
+            title = _extract_html_title(p)
+            pages.append({"title": title, "path": f"/{rel_path}"})
         elif p.suffix in COMPILABLE_EXTENSIONS and "src" in p.parts and "content" in p.parts:
             idx = p.parts.index("content")
             rel_parts = p.parts[idx + 1:]
