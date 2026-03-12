@@ -13,6 +13,7 @@ CI 環境（GitHub Actions）で実行される前提。
 
 from __future__ import annotations
 
+import html
 import io
 import json
 import os
@@ -540,10 +541,14 @@ def _record_manifest(synced_files: list[Path]) -> None:
 def _extract_html_title(path: Path) -> str:
     """HTML ファイルの <title> タグからタイトルを取得する. 見つからなければファイル名を返す."""
     try:
-        content = path.read_text(encoding="utf-8", errors="ignore")
-        m = re.search(r"<title[^>]*>(.*?)</title>", content, re.IGNORECASE | re.DOTALL)
+        # <title> は必ず <head> 内にあるので先頭 4 KB だけ読めば十分
+        with path.open(encoding="utf-8", errors="ignore") as f:
+            head_chunk = f.read(4096)
+        m = re.search(r"<title[^>]*>(.*?)</title>", head_chunk, re.IGNORECASE | re.DOTALL)
         if m:
-            return re.sub(r"\s+", " ", m.group(1)).strip()
+            title = html.unescape(re.sub(r"\s+", " ", m.group(1)).strip())
+            if title:
+                return title
     except OSError:
         pass
     return path.stem
