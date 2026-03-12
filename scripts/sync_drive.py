@@ -13,6 +13,7 @@ CI 環境（GitHub Actions）で実行される前提。
 
 from __future__ import annotations
 
+import html
 import io
 import json
 import os
@@ -537,6 +538,22 @@ def _record_manifest(synced_files: list[Path]) -> None:
     manifest.write_text("\n".join(str(p) for p in synced_files) + "\n")
 
 
+def _extract_html_title(path: Path) -> str:
+    """HTML ファイルの <title> タグからタイトルを取得する. 見つからなければファイル名を返す."""
+    try:
+        # <title> は必ず <head> 内にあるので先頭 4 KB だけ読めば十分
+        with path.open(encoding="utf-8", errors="ignore") as f:
+            head_chunk = f.read(4096)
+        m = re.search(r"<title[^>]*>(.*?)</title>", head_chunk, re.IGNORECASE | re.DOTALL)
+        if m:
+            title = html.unescape(re.sub(r"\s+", " ", m.group(1)).strip())
+            if title:
+                return title
+    except OSError:
+        pass
+    return path.stem
+
+
 def _record_pages_index(synced_files: list[Path]) -> None:
     """フロントエンドのナビゲーション用に index を生成."""
     pages = []
@@ -546,7 +563,8 @@ def _record_pages_index(synced_files: list[Path]) -> None:
             idx = p.parts.index("public")
             rel_parts = p.parts[idx + 1:]
             rel_path = "/".join(rel_parts)
-            pages.append({"title": p.stem, "path": f"/{rel_path}"})
+            title = _extract_html_title(p)
+            pages.append({"title": title, "path": f"/{rel_path}"})
         elif p.suffix in COMPILABLE_EXTENSIONS and "src" in p.parts and "content" in p.parts:
             idx = p.parts.index("content")
             rel_parts = p.parts[idx + 1:]
