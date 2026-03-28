@@ -5,7 +5,7 @@ import { NotFound } from "./pages/NotFound";
 import React, { Suspense } from "react";
 
 // 動的に全ての同期ページをインポート
-const pages = import.meta.glob('../content/**/*.{tsx,jsx}');
+const pages = import.meta.glob('./content/**/*.{tsx,jsx}');
 
 export function App() {
   return (
@@ -15,7 +15,7 @@ export function App() {
 
         {/* Drive から同期した .tsx ページを動的に追加 */}
         {Object.keys(pages).map((path) => {
-          const name = path.match(/\.\.\/content\/(.*)\.(?:tsx|jsx)$/)?.[1];
+          const name = path.match(/\.\/content\/(.*)\.(?:tsx|jsx)$/)?.[1];
           if (!name) return null;
 
           const Component = React.lazy(pages[path] as any);
