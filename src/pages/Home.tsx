@@ -53,7 +53,7 @@ export function Home() {
           <div className="toc-empty">
             <p>ページがまだ同期されていません。</p>
             <p className="toc-empty-hint">
-              Drive に <code>.tsx</code> または <code>.html</code> ファイルを追加して同期スクリプトを実行してください。
+              Drive に <code>.tsx</code> / <code>.jsx</code> または <code>.html</code> ファイルを追加して同期スクリプトを実行してください。
             </p>
           </div>
         )}
